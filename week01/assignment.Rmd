@@ -1,0 +1,32 @@
+---
+title: "Lecture 1: Installing packages and working with R Markdown"
+author: "Emily Robitschek"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Note: The epiwraps and other dependencies install described in the install.R file did not work for me so I had to execute the following code (see below cell). I chose compilation from source for those options that came up.
+
+```{r fix_install, eval=FALSE, include=TRUE}
+
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(c("edgeR", "GenomicRanges", "EnrichedHeatmap", "BiocParallel", 
+                       "GenomicAlignments", "GenomicFiles", "Gviz", "ensembldb", 
+                       "AnnotationFilter"))
+
+install.packages("remotes")
+remotes::install_github("ETHZ-INS/epiwraps")
+```
+
+## Show that the epiwraps packages is installed and print out the information about the installed packages.
+
+```{r packages}
+library(epiwraps)
+sessionInfo()
+```
