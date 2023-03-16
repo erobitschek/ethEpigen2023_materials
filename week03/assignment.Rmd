@@ -1,0 +1,143 @@
+---
+title: 'W3 Assignment: Drosophila Peak Calling'
+author: "Emily Robitschek"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r, setup_load_packages}
+suppressPackageStartupMessages({
+  library(here)
+  library(AnnotationHub)
+  library(Rsubread)
+  library(rtracklayer)
+  library(Biostrings)
+  library(Rfastp)
+  library(epiwraps)
+})
+
+setwd(here("week03"))
+
+ah <- AnnotationHub()
+```
+
+# Download the data (raw reads)
+
+We download a dataset which is a ChIP-seq experiment mapping the bindings of the factor Drosophila ChIP-seq for the protein CTCF from ENCODE. (no input control for the purpose of this exercise)
+
+```{r, eval=FALSE}
+dir.create("drosophila")
+dir.create("drosophila/raw")
+download.file("https://www.encodeproject.org/files/ENCFF127RRR/@@download/ENCFF127RRR.fastq.gz", dest="drosophila/raw/CTCF.fastq.gz")
+```
+# Process the data
+
+## Reads QC with fastqc
+
+For this we will use shell commands:
+
+```{bash engine.opts='-l', eval=FALSE}
+mkdir -p ./drosophila/raw_fastqc
+fastqc -o ./drosophila/raw_fastqc --threads 4 ./drosophila/raw/*.fastq.gz
+```
+
+This creates an html report with QC plots for each file. Can use multiqc to aggregate the reports with the following type of command: `multiqc -o raw_fastqc raw_fastqc` in a shell command cell.
+
+## Using Rfastp
+
+This will create an html report with before/after QC plots, as well as a trimmed and filtered fastq file. (Could use FastQC and trimmomatic instead for QC and trimming the adapter sequences respectively.)
+
+```{r}
+dir.create("drosophila/rfastp_trimmed")
+qc <- lapply(c(drosophila="drosophila/raw/CTCF.fastq.gz"), FUN=function(x){
+  Rfastp::rfastp(x, thread=4, overrepresentationAnalysis=TRUE,
+                 outputFastq=file.path("drosophila/rfastp_trimmed/",gsub("\\.fastq\\.gz$","",basename(x))))
+})
+```
+
+In addition, the R output object (equivalent to the .json stats also saved by the program) can be used to generate the QC plots inside a markdown, for example:
+
+```{r}
+Rfastp::curvePlot(qc$drosophila, curve="content_curves")
+```
+
+
+# Alignment
+
+## Using Rsubread 
+
+Could also use bowtie2 instead to build an index and alignment of the reads.
+
+### Building a genome index for mapping
+
+This we have to do only once for a genome, and can then re-use across projects. 
+
+```{r, eval=FALSE}
+# we get the genome sequence from AnnotationHub
+genome <- ah[["AH49674"]]
+# we create a new directory that will contain the genome index
+dir.create("drosophila/BDGP6_genome")
+# we write the genome sequence in fasta format
+export(import.2bit(genome), "drosophila/BDGP6_genome/genome.fasta.gz", compress=TRUE)
+# we build a Rsubread index
+Rsubread::buildindex("drosophila/BDGP6_genome/rsubread", reference="drosophila/BDGP6_genome/genome.fasta.gz")
+```
+
+### Alignment
+
+```{r, align}
+dir.create("drosophila/aligned")
+align.stats <- Rsubread::align(index="drosophila/BDGP6_genome/rsubread", type="dna",
+                               readfile1=c("drosophila/rfastp_trimmed/CTCF_R1.fastq.gz"),
+                               output_file=c("drosophila/aligned/CTCF.bam"),
+                               nthreads=6, sortReadsByCoordinates=TRUE)
+align.stats
+```
+
+# Peak calling
+
+## Using MACS3 
+
+Note that the in-class example used MACS2, but this works in the same way.
+
+```{bash engine.opts='-l', call_peaks}
+mkdir -p drosophila/peaks
+macs3 callpeak --outdir drosophila/peaks -n CTCF --gsize dm -t drosophila/aligned/CTCF.bam
+```
+
+We can then import the peaks in R:
+
+```{r, import_peaks}
+peaks <- rtracklayer::import("drosophila/peaks/CTCF_peaks.narrowPeak")
+source("drosophila/peaks/CTCF_model.r")
+```
+
+# Report:
+### 1. How many reads (and what percentage) were mapped
+According to the information from the Rfastp Report, 3504769 reads were mapped of those that passed filtering. This corresponds to a percentage of 91.82%.
+```{r, percent_mapped_reads}
+align_stats <- align.stats
+total_reads <-	align_stats$CTCF.bam[1]
+mapped_reads <-	align_stats$CTCF.bam[2]
+percent_mapped <- (mapped_reads/total_reads)*100
+mapped_reads
+percent_mapped
+
+```
+
+### 2. How many peaks were found?
+
+```{r, info_peaks}
+num_peaks <- length(peaks)
+num_peaks
+
+```
+There were 5392 peaks found.
+
+### 3. Plot the signal around one of the peaks
+(i.e. your report should contain 3 numbers and 1 plot!)
+
+```{r}
+plotSignalTracks(files="drosophila/peaks/CTCF_summits.bed", region="2L:3472135-3472682")
+```
+Please make sure that you name your final file assignment.html and put it in this folder !!
